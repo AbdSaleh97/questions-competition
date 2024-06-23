@@ -5,15 +5,21 @@ import requests
 
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
-        s = self.path
-        url_component = parse.urlsplit(s)
-        query_string_list = parse.parse_qsl(url_component.query)
-        my_dic = dict(query_string_list)
+        try:
+            s = self.path
+            url_component = parse.urlsplit(s)
+            query_string_list = parse.parse_qsl(url_component.query)
+            my_dic = dict(query_string_list)
 
-        if "category" in my_dic:
-            self.get_questions_by_category(my_dic)
-        else:
-            self.get_questions_by_amount(my_dic)
+            if "category" in my_dic:
+                self.get_questions_by_category(my_dic)
+            else:
+                self.get_questions_by_amount(my_dic)
+        except Exception as e:
+            self.send_response(500)
+            self.send_header("Content-type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": str(e)}).encode())
 
     def get_questions_by_amount(self, my_dic):
         amount = my_dic.get("amount", "20")  # Default to 20 if no amount provided
@@ -28,11 +34,19 @@ class handler(BaseHTTPRequestHandler):
 
         url = f"https://opentdb.com/api.php?amount={amount}"
 
-        req = requests.get(url)
-        rec_question = req.json()
+        try:
+            req = requests.get(url)
+            req.raise_for_status()
+            rec_question = req.json()
+        except requests.RequestException as e:
+            self.send_response(500)
+            self.send_header("Content-type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": str(e)}).encode())
+            return
+
         output = []
-        num = 1
-        for item in rec_question["results"]:
+        for num, item in enumerate(rec_question["results"], start=1):
             question = item["question"]
             correct_answer = item["correct_answer"]
             cat = item["category"]
@@ -42,20 +56,11 @@ class handler(BaseHTTPRequestHandler):
                 "answer": correct_answer,
                 "category": cat
             })
-            num += 1
 
-        # Send HTTP status 200 (OK)
         self.send_response(200)
-
-        # Set the Content-type to 'application/json'
         self.send_header("Content-type", "application/json")
-
-        # End headers
         self.end_headers()
-
-        # Write the output to the response
         self.wfile.write(json.dumps(output).encode())
-        return
 
     def get_questions_by_category(self, my_dic):
         category = my_dic.get("category", "")
@@ -75,10 +80,17 @@ class handler(BaseHTTPRequestHandler):
 
         url = f"https://opentdb.com/api.php?amount={amount}&category={category}"
 
-        req = requests.get(url)
-        rec_question = req.json()
+        try:
+            req = requests.get(url)
+            req.raise_for_status()
+            rec_question = req.json()
+        except requests.RequestException as e:
+            self.send_response(500)
+            self.send_header("Content-type", "text/plain")
+            self.end_headers()
+            self.wfile.write(f"Error fetching data: {e}".encode())
+            return
 
-        # Validate the response from the API
         if rec_question["response_code"] != 0:
             self.send_response(400)
             self.send_header("Content-type", "text/plain")
@@ -87,23 +99,20 @@ class handler(BaseHTTPRequestHandler):
             return
 
         output = ""
-        num = 1
-        for item in rec_question["results"]:
+        for num, item in enumerate(rec_question["results"], start=1):
             question = item["question"]
             correct_answer = item["correct_answer"]
             cat = item["category"]
             output += f"Category: {cat}\nQuestion number: {num}\nQuestion: {question}\nAnswer: {correct_answer}\n\n"
-            num += 1
 
-        # Send HTTP status 200 (OK)
         self.send_response(200)
-
-        # Set the Content-type to 'text/plain'
         self.send_header("Content-type", "text/plain")
-
-        # End headers
         self.end_headers()
-
-        # Write the output to the response
         self.wfile.write(output.encode())
-        return
+
+if __name__ == "__main__":
+    from http.server import HTTPServer
+    server_address = ('', 8000)
+    httpd = HTTPServer(server_address, handler)
+    print("Server running on port 8000")
+    httpd.serve_forever()
